@@ -63,6 +63,40 @@ class VMRequest(BaseModel):
         return v
 
 
+class VMControlRequest(BaseModel):
+    node: str
+    vmid: int
+
+
+class VMConfigRequest(BaseModel):
+    node: str
+    vmid: int
+    vcpu: int
+    memory: int
+    resize: int
+
+    @field_validator("vcpu")
+    @classmethod
+    def validate_vcpu(cls, v: int) -> int:
+        if v < 1 or v > 16:
+            raise ValueError("vCPU: 1-16")
+        return v
+
+    @field_validator("memory")
+    @classmethod
+    def validate_memory(cls, v: int) -> int:
+        if v < 1024 or v > 24576:
+            raise ValueError("Memory: 1024-24576MB (1-24GB)")
+        return v
+
+    @field_validator("resize")
+    @classmethod
+    def validate_resize(cls, v: int) -> int:
+        if v < 10 or v > 200:
+            raise ValueError("Disk resize: 10-200GB")
+        return v
+
+
 @router.get("/vms")
 async def list_vms():
     try:
@@ -86,6 +120,7 @@ async def list_vms():
                     )
             except Exception as e:
                 logger.warning("Node %s scan failed: %s", node, e)
+        vms.sort(key=lambda x: x["vmid"])
         return {"vms": vms, "total": len(vms)}
     except Exception as e:
         logger.error("List VMs failed: %s", e)
@@ -128,14 +163,14 @@ async def create_vm(request: VMRequest, background_tasks: BackgroundTasks):
 
         # resize the disk
         try:
-            proxmox.nodes(target_node).qemu(vmid).resize.post(
-                virtio0=f"{request.resize}G"
+            proxmox.nodes(target_node).qemu(vmid).resize.put(
+                disk="scsi0", size=f"{request.resize}G"
             )
         except Exception:
             pass
 
         # start the VM
-        background_tasks.add_task(start_vm, target_node, vmid, vm_name)
+        background_tasks.add_task(start_vm_task, target_node, vmid)
 
         return {
             "status": "created",
@@ -157,15 +192,99 @@ async def create_vm(request: VMRequest, background_tasks: BackgroundTasks):
         raise HTTPException(500, f"VM creation failed: {str(e)}") from e
 
 
-@router.post("/vm/start")
-async def start_vm(node: str, vmid: int, vm_name: str):
+async def start_vm_task(node: str, vmid: int):
     try:
         await asyncio.sleep(3)
         proxmox = get_proxmox()
         proxmox.nodes(node).qemu(vmid).status.start.post()
-        logger.info("VM %s(%s) started on %s", vm_name, vmid, node)
+        logger.info("VM %s auto-started on %s", vmid, node)
     except Exception as e:
-        raise HTTPException(500, f"VM start failed: {e}") from e
+        logger.error("Auto-start VM %s on %s failed: %s", vmid, node, e)
+
+
+@router.post("/vm/start")
+async def start_vm(request: VMControlRequest):
+    node = request.node
+    vmid = request.vmid
+    try:
+        proxmox = get_proxmox()
+        proxmox.nodes(node).qemu(vmid).status.start.post()
+        logger.info("VM %s started on %s", vmid, node)
+        return {"status": "started", "vmid": vmid}
+    except Exception as e:
+        raise HTTPException(500, f"VM start failed: {e}")
+
+
+@router.post("/vm/shutdown")
+async def shutdown_vm(request: VMControlRequest):
+    node = request.node
+    vmid = request.vmid
+    try:
+        proxmox = get_proxmox()
+        proxmox.nodes(node).qemu(vmid).status.shutdown.post()
+        logger.info("VM %s shutted down on %s", vmid, node)
+        return {"status": "shutted down", "vmid": vmid}
+    except Exception as e:
+        raise HTTPException(500, f"VM shutdown failed: {e}")
+
+
+@router.get("/nodes/{node}/{vmid}")
+async def get_vm(node: str, vmid: int):
+    try:
+        proxmox = get_proxmox()
+        status = proxmox.nodes(node).qemu(vmid).status.current.get()
+        network = proxmox.nodes(node).qemu(vmid).agent.get("network-get-interfaces")
+        logger.info()
+        return status, network
+    except Exception as e:
+        raise HTTPException(500, f"VM get failed: {e}") from e
+
+
+@router.post("/vm/config")
+async def config_vm(request: VMConfigRequest):
+    try:
+        proxmox = get_proxmox()
+
+        node = request.node
+        vmid = request.vmid
+
+        proxmox.nodes(node).qemu(vmid).config.post(
+            cores=request.vcpu,
+            memory=request.memory,
+        )
+        proxmox.nodes(node).qemu(vmid).resize.put(
+            disk="scsi0", size=f"{request.resize}G"
+        )
+        logger.info("VM %s reconfigured from %s", vmid, node)
+        return {"status": "reconfigured", "vmid": vmid}
+    except Exception as e:
+        raise HTTPException(500, f"VM config failed: {e}") from e
+
+
+@router.post("/vm/delete")
+async def delete_vm(request: VMControlRequest):
+    node = request.node
+    vmid = request.vmid
+
+    try:
+        proxmox = get_proxmox()
+
+        try:
+            status = proxmox.nodes(node).qemu(vmid).status.current.get()
+            vm_status = status.get("status", "unknown")
+        except Exception:
+            vm_status = "unknown"
+
+        if vm_status == "running":
+            logger.info("VM %s is running, stopping...", vmid)
+            proxmox.nodes(node).qemu(vmid).status.stop.post()
+            await asyncio.sleep(3)
+
+        proxmox.nodes(node).qemu(vmid).delete()
+        logger.info("VM %s deleted from %s", vmid, node)
+        return {"status": "deleted", "vmid": vmid}
+    except Exception as e:
+        raise HTTPException(500, f"VM delete failed: {e}")
 
 
 @router.get("/nodes")
@@ -224,7 +343,7 @@ async def get_nodes():
                 )
 
         # order by CPU usage
-        nodes.sort(key=lambda x: x["cpu"])
+        nodes.sort(key=lambda x: x["value"])
 
         return {"nodes": nodes}
 

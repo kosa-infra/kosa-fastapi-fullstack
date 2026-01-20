@@ -81,6 +81,52 @@
       </div>
     </div>
 
+    <!-- VM Config Modal -->
+    <div class="modal" id="configModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modalTitle">VM 설정</h3>
+          <button class="modal-close" onclick="closeConfigModal()">
+            &times;
+          </button>
+        </div>
+        <form id="configForm">
+          <input type="hidden" name="node" id="configNode" />
+          <input type="hidden" name="vmid" id="configVmid" />
+
+          <div class="form-group">
+            <label>vCPU</label>
+            <input name="vcpu" type="number" min="1" max="16" id="configVcpu" />
+          </div>
+          <div class="form-group">
+            <label>RAM (MB)</label>
+            <input
+              name="memory"
+              type="number"
+              min="1024"
+              max="24576"
+              id="configMemory"
+            />
+          </div>
+          <div class="form-group">
+            <label>디스크 (GB)</label>
+            <input
+              name="resize"
+              type="number"
+              min="10"
+              max="200"
+              id="configResize"
+            />
+          </div>
+
+          <div class="form-row">
+            <button type="button" onclick="closeConfigModal()">취소</button>
+            <button type="submit">설정 적용</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <script src="/static/js/dashboard.js"></script>
   </body>
 </html>
