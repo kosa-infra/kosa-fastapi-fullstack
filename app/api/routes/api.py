@@ -157,6 +157,7 @@ async def create_vm(request: VMRequest, background_tasks: BackgroundTasks):
         raise HTTPException(500, f"VM creation failed: {str(e)}") from e
 
 
+@router.post("/vm/start")
 async def start_vm(node: str, vmid: int, vm_name: str):
     try:
         await asyncio.sleep(3)
