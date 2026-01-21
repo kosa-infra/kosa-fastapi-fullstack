@@ -4,10 +4,10 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    PROXMOX_HOST: str = ""
-    PROXMOX_USER: str = ""
-    PROXMOX_TOKEN_NAME: str = ""
-    PROXMOX_TOKEN_VALUE: str = ""
+    PROXMOX_HOST: str
+    PROXMOX_USER: str
+    PROXMOX_TOKEN_NAME: str
+    PROXMOX_TOKEN_VALUE: str
 
     VM_TEMPLATE: dict[str, Any] = {
         "vcpu": 1,
@@ -20,6 +20,10 @@ class Settings(BaseSettings):
         "cipassword": "password",
         "ipconfig0": "ip=dhcp",
     }
+
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
 
 
 settings = Settings()
