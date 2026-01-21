@@ -40,3 +40,23 @@ const removeStorage = () => {
     // 모든 스토리지 비우기
     // localStorage.clear()
 }
+
+
+
+const login = async () => {
+    const response = await fetch('/api/data')
+
+    if (response.isLogin) {
+        setStorage(data.response, response.userName)
+
+        // 이후 액션
+    } else {
+        removeStorage();
+        window.alert('error!')
+    }
+
+}
+
+const logout = async () => {
+    removeStorage();
+}
