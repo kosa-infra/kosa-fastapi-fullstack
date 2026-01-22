@@ -1,0 +1,8 @@
+{% extends "base.html" %} {% block title %}회원가입{% endblock %} {% block content %}
+<h2>회원가입</h2>
+<form method="post" action="/auth/register">
+  <input type="text" name="username" placeholder="아이디" required />
+  <input type="password" name="password" placeholder="비밀번호" required />
+  <button type="submit">가입하기</button>
+</form>
+{% endblock %}
