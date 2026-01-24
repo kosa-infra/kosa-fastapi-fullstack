@@ -5,6 +5,7 @@ from functools import lru_cache
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from proxmoxer import ProxmoxAPI
+from proxmoxer.core import ResourceException
 from pydantic import BaseModel, field_validator
 
 from app.core.config import settings
@@ -13,23 +14,30 @@ router = APIRouter(prefix="/api", tags=["api"])
 logger = logging.getLogger(__name__)
 
 
-@lru_cache(1)
-def get_proxmox() -> ProxmoxAPI:
+@lru_cache(maxsize=None)
+def get_proxmox(cluster_name: str) -> ProxmoxAPI:
+    cluster_conf = settings.PROXMOX_CLUSTERS.get(cluster_name)
+    if not cluster_conf:
+        raise ValueError(f"Unknown Proxmox cluster: {cluster_name}")
+
     try:
         return ProxmoxAPI(
-            settings.PROXMOX_HOST,
-            user=settings.PROXMOX_USER,
-            token_name=settings.PROXMOX_TOKEN_NAME,
-            token_value=settings.PROXMOX_TOKEN_VALUE,
+            cluster_conf["host"],
+            user=cluster_conf["user"],
+            token_name=cluster_conf["token_name"],
+            token_value=cluster_conf["token_value"],
             verify_ssl=False,
         )
     except Exception as e:
-        logger.error("ProxmoxAPI initialization failed: %s", e)
-        raise RuntimeError(f"Failed to connect to Proxmox: {e}") from e
+        logger.error("ProxmoxAPI init failed for %s: %s", cluster_name, e)
+        raise RuntimeError(
+            f"Failed to connect to Proxmox cluster {cluster_name}"
+        ) from e
 
 
 class VMRequest(BaseModel):
     node_zone: str
+    cluster_name: str
     agent: int = settings.VM_TEMPLATE["agent"]
     vcpu: int = settings.VM_TEMPLATE["vcpu"]
     cpu: str = settings.VM_TEMPLATE["cpu"]
@@ -64,11 +72,13 @@ class VMRequest(BaseModel):
 
 
 class VMControlRequest(BaseModel):
+    cluster_name: str
     node: str
     vmid: int
 
 
 class VMConfigRequest(BaseModel):
+    cluster_name: str
     node: str
     vmid: int
     vcpu: int
@@ -98,9 +108,9 @@ class VMConfigRequest(BaseModel):
 
 
 @router.get("/vms")
-async def list_vms():
+async def list_vms(cluster_name: str):
     try:
-        proxmox = get_proxmox()
+        proxmox = get_proxmox(cluster_name)
         vms = []
         nodes = proxmox.nodes.get()
 
@@ -139,7 +149,7 @@ async def create_vm(request: VMRequest, background_tasks: BackgroundTasks):
 
     vmid = None
     try:
-        proxmox = get_proxmox()
+        proxmox = get_proxmox(request.cluster_name)
         logger.info("Creating VM %s on %s", vm_name, target_node)
 
         # allocate VMID
@@ -147,7 +157,15 @@ async def create_vm(request: VMRequest, background_tasks: BackgroundTasks):
         logger.info("Allocated VMID: %s", vmid)
 
         # clone the template
-        proxmox.nodes(target_node).qemu(9000).clone.post(newid=vmid, name=vm_name)
+        for template_id in range(9000, 9003):
+            try:
+                proxmox.nodes(target_node).qemu(template_id).clone.post(
+                    newid=vmid, name=vm_name
+                )
+                break
+            except ResourceException:
+                if template_id == 9002:
+                    raise
 
         # reconfigure the VM
         proxmox.nodes(target_node).qemu(vmid).config.post(
@@ -170,7 +188,7 @@ async def create_vm(request: VMRequest, background_tasks: BackgroundTasks):
             pass
 
         # start the VM
-        background_tasks.add_task(start_vm_task, target_node, vmid)
+        background_tasks.add_task(start_vm_task, request.cluster_name, target_node, vmid)
 
         return {
             "status": "created",
@@ -185,17 +203,21 @@ async def create_vm(request: VMRequest, background_tasks: BackgroundTasks):
         # Rollback
         if vmid and target_node:
             try:
-                get_proxmox().nodes(target_node).qemu(vmid).status.stop.post()
-                get_proxmox().nodes(target_node).qemu(vmid).delete.post()
+                get_proxmox(request.cluster_name).nodes(target_node).qemu(
+                    vmid
+                ).status.stop.post()
+                get_proxmox(request.cluster_name).nodes(target_node).qemu(
+                    vmid
+                ).delete.post()
             except Exception:
                 pass
         raise HTTPException(500, f"VM creation failed: {str(e)}") from e
 
 
-async def start_vm_task(node: str, vmid: int):
+async def start_vm_task(cluster_name: str, node: str, vmid: int):
     try:
         await asyncio.sleep(3)
-        proxmox = get_proxmox()
+        proxmox = get_proxmox(cluster_name)
         proxmox.nodes(node).qemu(vmid).status.start.post()
         logger.info("VM %s auto-started on %s", vmid, node)
     except Exception as e:
@@ -207,7 +229,7 @@ async def start_vm(request: VMControlRequest):
     node = request.node
     vmid = request.vmid
     try:
-        proxmox = get_proxmox()
+        proxmox = get_proxmox(request.cluster_name)
         proxmox.nodes(node).qemu(vmid).status.start.post()
         logger.info("VM %s started on %s", vmid, node)
         return {"status": "started", "vmid": vmid}
@@ -220,7 +242,7 @@ async def shutdown_vm(request: VMControlRequest):
     node = request.node
     vmid = request.vmid
     try:
-        proxmox = get_proxmox()
+        proxmox = get_proxmox(request.cluster_name)
         proxmox.nodes(node).qemu(vmid).status.shutdown.post()
         logger.info("VM %s shutted down on %s", vmid, node)
         return {"status": "shutted down", "vmid": vmid}
@@ -228,10 +250,10 @@ async def shutdown_vm(request: VMControlRequest):
         raise HTTPException(500, f"VM shutdown failed: {e}")
 
 
-@router.get("/nodes/{node}/{vmid}")
-async def get_vm(node: str, vmid: int):
+@router.get("/nodes/{cluster_name}/{node}/{vmid}")
+async def get_vm(cluster_name: str, node: str, vmid: int):
     try:
-        proxmox = get_proxmox()
+        proxmox = get_proxmox(cluster_name)
         status = proxmox.nodes(node).qemu(vmid).status.current.get()
         network = proxmox.nodes(node).qemu(vmid).agent.get("network-get-interfaces")
         logger.info()
@@ -243,7 +265,7 @@ async def get_vm(node: str, vmid: int):
 @router.post("/vm/config")
 async def config_vm(request: VMConfigRequest):
     try:
-        proxmox = get_proxmox()
+        proxmox = get_proxmox(request.cluster_name)
 
         node = request.node
         vmid = request.vmid
@@ -267,7 +289,7 @@ async def delete_vm(request: VMControlRequest):
     vmid = request.vmid
 
     try:
-        proxmox = get_proxmox()
+        proxmox = get_proxmox(request.cluster_name)
 
         try:
             status = proxmox.nodes(node).qemu(vmid).status.current.get()
@@ -287,10 +309,10 @@ async def delete_vm(request: VMControlRequest):
         raise HTTPException(500, f"VM delete failed: {e}")
 
 
-@router.get("/nodes")
-async def get_nodes():
+@router.get("/nodes/{cluster_name}")
+async def get_nodes(cluster_name: str):
     try:
-        proxmox = get_proxmox()
+        proxmox = get_proxmox(cluster_name)
         nodes = []
 
         # scan all nodes
