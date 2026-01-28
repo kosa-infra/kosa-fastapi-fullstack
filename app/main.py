@@ -1,10 +1,13 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
 
 from app.api.main import api_router
+from app.core.database import get_db
+from app.models import UserDB
 
 # logging
 logging.basicConfig(
@@ -37,3 +40,10 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/get")
+async def get_data(db: Session = Depends(get_db)):
+    data = db.query(UserDB).all()
+    print(data)
+    return data
