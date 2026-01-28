@@ -25,8 +25,17 @@
           const data = await response.json();
           localStorage.setItem("user", JSON.stringify(data));
           alert("로그인 성공! " + data.username);
-          // location.reload();
-          window.location = "/provision/dashboard";
+          location.reload();
+          window.location = "/dashboard";
+          // fetch("/api/get-redirect", {
+          //   method: "POST",
+          //   headers: { "Content-Type": "application/json" },
+          //   body: JSON.stringify(JSON.parse(localStorage.getItem("user"))),
+          // }).then((response) => {
+          //   if (response.redirected) {
+          //     window.location.href = response.url;
+          //   }
+          // });
         } else {
           const errorData = await response.json().catch(() => ({}));
           alert("로그인 실패: " + (errorData.detail || "알 수 없는 오류"));

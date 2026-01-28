@@ -5,13 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VM Provisioning Dashboard</title>
     <link rel="stylesheet" href="/static/css/dashboard.css" />
+    <style>
+      /* 🔥 Inline CSS for current-config styling */
+      .current-config {
+        border-left: 4px solid #0ea5e9;
+        font-weight: 500;
+      }
+    </style>
   </head>
   <body>
     <div class="container">
       <!-- Header -->
       <div class="header">
         <h1>🚀 VM Provisioning Dashboard</h1>
-        <p>Multi-Cluster Proxmox VM 셀프서비스 프로비저닝</p>
+        <p>
+          Multi-Cluster Proxmox VM 셀프서비스 프로비저닝 (최저 부하 노드
+          자동선택)
+        </p>
       </div>
 
       <!-- Stats -->
@@ -36,13 +46,13 @@
         </div>
       </div>
 
-      <!-- VM Form -->
+      <!-- VM Form - SIMPLIFIED (Auto Node Selection) -->
       <div class="card">
-        <h2>새 VM 생성</h2>
+        <h2>🆕 새 VM 생성</h2>
         <form id="vmForm">
-          <!-- 🆕 클러스터 선택 추가 -->
+          <!-- 클러스터 선택 -->
           <div class="form-group">
-            <label>클러스터 <small id="clusterStatus"></small></label>
+            <label>클러스터 <small>(최적 노드 자동 선택)</small></label>
             <select name="cluster_name" id="clusterSelect" required>
               <option value="">클러스터를 선택하세요</option>
               <option value="cluster_a">🌍 Region A (cluster_a)</option>
@@ -50,39 +60,90 @@
             </select>
           </div>
 
+          <!-- 자동 노드 선택 상태 -->
           <div class="form-group">
-            <label>노드 존 <small id="nodeStatus"></small></label>
-            <select name="node_zone" id="nodeZoneSelect" disabled>
-              <option value="">먼저 클러스터를 선택하세요</option>
-            </select>
+            <label>🤖 노드 선택</label>
+            <div
+              id="autoNodeStatus"
+              style="
+                padding: 12px;
+                background: rgba(16, 185, 129, 0.1);
+                border-radius: 8px;
+                border-left: 4px solid #10b981;
+                font-size: 14px;
+              "
+            >
+              클러스터 선택 시 <strong>최저 부하 노드 자동 할당</strong><br />
+              <small><code>CPU% + RAM% + (실행중 VM/10)</code> 알고리즘</small>
+            </div>
           </div>
 
+          <!-- 리소스 설정 -->
           <div class="form-row">
             <div class="form-group">
-              <label>vCPU</label>
-              <input name="vcpu" type="number" value="1" min="1" max="16" />
+              <label>vCPU (1-16)</label>
+              <input
+                name="vcpu"
+                type="number"
+                value="1"
+                min="1"
+                max="16"
+                required
+              />
             </div>
             <div class="form-group">
-              <label>RAM (MB)</label>
+              <label>RAM (MB, 1024-24576)</label>
               <input
                 name="memory"
                 type="number"
                 value="1024"
                 min="1024"
                 max="24576"
+                required
               />
+              <small style="font-size: 12px; color: #6b7280"
+                >1GB = 1024MB</small
+              >
             </div>
           </div>
-          <div class="form-group">
-            <label>디스크 (GB)</label>
-            <input name="resize" type="number" value="20" min="10" max="200" />
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>디스크 (GB, 10-200)</label>
+              <input
+                name="resize"
+                type="number"
+                value="20"
+                min="10"
+                max="200"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label>VM 이름 (선택사항)</label>
+              <input name="vm_name" placeholder="my-web-vm" maxlength="32" />
+            </div>
           </div>
+
           <div class="form-group">
-            <label>VM 이름</label>
-            <input name="vm_name" placeholder="my-web-vm" />
+            <label>🔑 SSH 공개키 (선택사항)</label>
+            <textarea
+              name="ssh_public_key"
+              placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ..."
+              rows="3"
+              style="width: 100%; font-family: monospace"
+            ></textarea>
+            <small style="font-size: 12px; color: #6b7280">
+              VM 로그인용 SSH 공개키를 입력하세요.
+            </small>
           </div>
-          <button type="submit" id="submitBtn">VM 생성 시작</button>
-          <div class="loading" id="loading">VM 생성 중입니다... ⏳</div>
+
+          <button type="submit" id="submitBtn">
+            🚀 VM 생성 (최저 부하 노드 자동 선택)
+          </button>
+          <div class="loading" id="loading" style="display: none">
+            1️⃣ 최저 부하 노드 분석 → 2️⃣ VM 생성 중... ⏳
+          </div>
         </form>
       </div>
 
@@ -90,56 +151,138 @@
       <div class="card">
         <div class="list-header">
           <h2>📋 VM 목록 (<span id="vm-count">0</span>)</h2>
-          <button class="refresh-btn" onclick="loadVms()">🔄 새로고침</button>
+          <button
+            class="refresh-btn"
+            onclick="refreshVms()"
+            title="수동 새로고침"
+          >
+            🔄 새로고침
+          </button>
         </div>
         <div class="vm-list" id="vmList">
-          클러스터를 선택한 후 새로고침하세요
+          클러스터를 선택하면 실시간 VM 목록이 표시됩니다
         </div>
       </div>
     </div>
 
-    <!-- VM Config Modal -->
+    <!-- 🔥 VM Config Modal - CURRENT SETTINGS -->
     <div class="modal" id="configModal">
       <div class="modal-content">
         <div class="modal-header">
-          <h3 id="modalTitle">VM 설정</h3>
-          <button class="modal-close" onclick="closeConfigModal()">
-            &times;
+          <h3 id="modalTitle">VM 설정 변경</h3>
+          <button
+            class="modal-close"
+            onclick="closeConfigModal()"
+            title="닫기 (ESC)"
+          >
+            ×
           </button>
         </div>
+
+        <!-- 🔥 현재 설정 표시 -->
+        <div
+          class="current-config"
+          id="currentConfig"
+          style="
+            padding: 16px;
+            background: #f0f9ff;
+            border-radius: 8px;
+            margin: 0 24px 20px 24px;
+            font-size: 14px;
+            color: #0369a1;
+            border-left: 4px solid #0ea5e9;
+          "
+        >
+          설정 로드 중...
+        </div>
+
+        <!-- 로딩 -->
+        <div
+          id="configLoading"
+          style="
+            text-align: center;
+            color: #6b7280;
+            padding: 20px;
+            display: none;
+            font-style: italic;
+          "
+        >
+          현재 VM 설정 로드 중... ⏳
+        </div>
+
         <form id="configForm">
+          <!-- 숨겨진 필드들 -->
           <input type="hidden" name="cluster_name" id="configCluster" />
           <input type="hidden" name="node" id="configNode" />
           <input type="hidden" name="vmid" id="configVmid" />
 
-          <div class="form-group">
-            <label>vCPU</label>
-            <input name="vcpu" type="number" min="1" max="16" id="configVcpu" />
+          <!-- 설정 입력 -->
+          <div class="form-group" style="margin-left: 24px; margin-right: 24px">
+            <label>vCPU (1-16)</label>
+            <input
+              name="vcpu"
+              type="number"
+              min="1"
+              max="16"
+              id="configVcpu"
+              required
+            />
           </div>
-          <div class="form-group">
-            <label>RAM (MB)</label>
+
+          <div class="form-group" style="margin-left: 24px; margin-right: 24px">
+            <label>RAM (MB, 1024-24576)</label>
             <input
               name="memory"
               type="number"
               min="1024"
               max="24576"
               id="configMemory"
+              required
             />
+            <small style="font-size: 12px; color: #6b7280"
+              >1GB = 1024MB | 변경 후 VM 재시작 필요</small
+            >
           </div>
-          <div class="form-group">
-            <label>디스크 (GB)</label>
+
+          <div class="form-group" style="margin-left: 24px; margin-right: 24px">
+            <label>디스크 (GB, 10-200)</label>
             <input
               name="resize"
               type="number"
               min="10"
               max="200"
               id="configResize"
+              required
             />
+            <small style="font-size: 12px; color: #6b7280"
+              >확장만 가능 | 축소 불가</small
+            >
           </div>
 
-          <div class="form-row">
-            <button type="button" onclick="closeConfigModal()">취소</button>
-            <button type="submit">설정 적용</button>
+          <div class="form-group" style="margin-left: 24px; margin-right: 24px">
+            <label>🔑 SSH 공개키 (선택사항)</label>
+            <textarea
+              name="ssh_public_key"
+              id="configSshKey"
+              placeholder="ssh-ed25519 AAAA..."
+              rows="3"
+              style="width: 100%; font-family: monospace"
+            ></textarea>
+            <small style="font-size: 12px; color: #6b7280">
+              기존 공개키를 교체하려면 새 키를 입력하세요.
+            </small>
+          </div>
+
+          <!-- 버튼들 -->
+          <div class="form-row" style="margin: 0 24px 24px">
+            <button
+              type="button"
+              onclick="closeConfigModal()"
+              style="background: linear-gradient(135deg, #6b7280, #4b5563)"
+            >
+              취소
+            </button>
+            <button type="submit">⚙️ 설정 적용</button>
           </div>
         </form>
       </div>

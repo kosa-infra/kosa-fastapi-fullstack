@@ -8,7 +8,7 @@ from auth.database import get_db  # ✅ DB 의존성
 from auth.models import UserDB  # ✅ MySQL UserDB 모델
 
 router = APIRouter()
-templates = Jinja2Templates(directory="./templates")  # ✅ 상위 templates 폴더
+templates = Jinja2Templates(directory="auth/templates")  # ✅ 상위 templates 폴더
 
 
 @router.get("/register", response_class=HTMLResponse)

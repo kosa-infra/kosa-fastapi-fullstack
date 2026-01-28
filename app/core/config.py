@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     PROXMOX_TOKEN_NAME2: str
     PROXMOX_TOKEN_VALUE2: str
 
+    MYSQL_USER: str
+    MYSQL_PASSWORD: str
+    MYSQL_HOST: str
+    MYSQL_DB: str
+    MYSQL_PORT: int = 3306
+
     @property
     def PROXMOX_CLUSTERS(self) -> dict[str, dict]:
         return {
