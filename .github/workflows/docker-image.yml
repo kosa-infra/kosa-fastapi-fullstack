@@ -1,4 +1,4 @@
-name: Docker Image CI & ArgoCD Update
+name: Docker Image CI
 
 on:
   push:
@@ -6,16 +6,11 @@ on:
   pull_request:
     branches: ["main"]
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
-  deploy:
+  docker:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout app repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -24,68 +19,13 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push provisioner
-        id: provisioner
         run: |
-          TAG=$(date +%s)-${GITHUB_SHA::7}
-          IMAGE_TAG=${{ vars.DOCKERHUB_USERNAME }}/provisioner:$TAG
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "full_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-
-          docker build . --file Dockerfile --tag $IMAGE_TAG
-          docker push $IMAGE_TAG
-          echo "Built and pushed: $IMAGE_TAG"
+          IMAGE=${{ vars.DOCKERHUB_USERNAME }}/provisioner:latest
+          docker build . --file Dockerfile --tag $IMAGE
+          docker push $IMAGE
 
       - name: Build and push provisioner-auth
-        id: provisioner-auth
         run: |
-          TAG=$(date +%s)-${GITHUB_SHA::7}
-          IMAGE_TAG=${{ vars.DOCKERHUB_USERNAME }}/provisioner-auth:$TAG
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "full_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-
-          docker build . --file Dockerfile.auth --tag $IMAGE_TAG
-          docker push $IMAGE_TAG
-          echo "Built and pushed: $IMAGE_TAG"
-
-      - name: Checkout kosa-argocd repo
-        uses: actions/checkout@v4
-        with:
-          repository: kosa-infra/kosa-argocd
-          ref: main
-          token: ${{ secrets.GITHUB_TOKEN }}
-          path: kosa-argocd
-
-      - name: Update provisioner image tag in ArgoCD
-        run: |
-          cd kosa-argocd/provisioner
-          PROVISIONER_TAG="${{ steps.provisioner.outputs.tag }}"
-          sed -i "s|docker.io/nervyniftypyramid/provisioner:[^ ]*|docker.io/nervyniftypyramid/provisioner:${{ steps.provisioner.outputs.tag }}|g" provisioner-deployment.yaml
-          echo "Updated provisioner tag to: $PROVISIONER_TAG"
-
-      - name: Update provisioner-auth image tag in ArgoCD
-        run: |
-          cd kosa-argocd/provisioner
-          AUTH_TAG="${{ steps['provisioner-auth'].outputs.tag }}"
-          sed -i "s|docker.io/nervyniftypyramid/provisioner-auth:[^ ]*|docker.io/nervyniftypyramid/provisioner-auth:${{ steps['provisioner-auth'].outputs.tag }}|g" provisioner-auth-deployment.yaml
-          echo "Updated auth tag to: $AUTH_TAG"
-
-      - name: Commit and push to kosa-argocd
-        run: |
-          cd kosa-argocd
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add provisioner/
-          if git diff --staged --quiet; then
-            echo "No image tag changes to commit"
-            exit 0
-          fi
-
-          git commit -m "chore: bump provisioner:${{ steps.provisioner.outputs.tag }} auth:${{ steps['provisioner-auth'].outputs.tag }}
-
-          from ${{ github.repository }}@${{ github.sha }}
-
-          [skip ci]"
-
-          git push origin main
-          echo "Pushed to kosa-argocd"
+          IMAGE=${{ vars.DOCKERHUB_USERNAME }}/provisioner-auth:latest
+          docker build . --file Dockerfile.auth --tag $IMAGE
+          docker push $IMAGE
