@@ -49,8 +49,8 @@ jobs:
           git clone https://x-access-token:${GIT_TOKEN}@github.com/Lidoca/kosa-argocd.git argocd-repo
           cd argocd-repo
 
-          sed -i "s|${REGISTRY_USER}/provisioner:.*|${REGISTRY_USER}/${PROVISIONER_IMAGE}|g" provisioner/provisioner-deployment.yaml
-          sed -i "s|${REGISTRY_USER}/provisioner-auth:.*|${REGISTRY_USER}/${PROVISIONER_AUTH_IMAGE}|g" provisioner/provision-auth-deployment.yaml
+          sed -i "s|${REGISTRY_USER}/provisioner:.*|${PROVISIONER_IMAGE}|g" provisioner/provisioner-deployment.yaml
+          sed -i "s|${REGISTRY_USER}/provisioner-auth:.*|${PROVISIONER_AUTH_IMAGE}|g" provisioner/provision-auth-deployment.yaml
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
