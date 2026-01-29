@@ -29,7 +29,7 @@ jobs:
           docker build . --file Dockerfile --tag ${IMAGE_BASE}:${GIT_SHA} --tag ${IMAGE_BASE}:latest
           docker push ${IMAGE_BASE}:${GIT_SHA}
           docker push ${IMAGE_BASE}:latest
-          echo "PROVISIONER_IMAGE=${IMAGE_BASE}:${GIT_SHA}" >> $GITHUB_ENV
+          PROVISIONER_IMAGE=${IMAGE_BASE}:${GIT_SHA}
 
       - name: Build and push provisioner-auth
         run: |
@@ -37,7 +37,7 @@ jobs:
           docker build . --file Dockerfile.auth --tag ${IMAGE_BASE}:${GIT_SHA} --tag ${IMAGE_BASE}:latest
           docker push ${IMAGE_BASE}:${GIT_SHA}
           docker push ${IMAGE_BASE}:latest
-          echo "PROVISIONER_AUTH_IMAGE=${IMAGE_BASE}:${GIT_SHA}" >> $GITHUB_ENV
+          PROVISIONER_AUTH_IMAGE=${IMAGE_BASE}:${GIT_SHA}
 
       - name: Update ArgoCD repo
         if: github.ref == 'refs/heads/main'
