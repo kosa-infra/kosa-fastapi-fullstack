@@ -1,5 +1,4 @@
-name: Docker Image CI
-
+name: Docker Image CI/CD
 on:
   push:
     branches: ["main"]
@@ -9,23 +8,53 @@ on:
 jobs:
   docker:
     runs-on: ubuntu-latest
+    env:
+      REGISTRY_USER: ${{ vars.DOCKERHUB_USERNAME }}
+      GIT_SHA: ${{ github.sha }}
+      GIT_SHORT_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
+          username: ${{ env.REGISTRY_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push provisioner
         run: |
-          IMAGE=${{ vars.DOCKERHUB_USERNAME }}/provisioner:latest
-          docker build . --file Dockerfile --tag $IMAGE
-          docker push $IMAGE
+          IMAGE_BASE=${REGISTRY_USER}/provisioner
+          docker build . --file Dockerfile --tag ${IMAGE_BASE}:${GIT_SHA} --tag ${IMAGE_BASE}:latest
+          docker push ${IMAGE_BASE}:${GIT_SHA}
+          docker push ${IMAGE_BASE}:latest
+          echo "PROVISIONER_IMAGE=${IMAGE_BASE}:${GIT_SHA}" >> $GITHUB_ENV
 
       - name: Build and push provisioner-auth
         run: |
-          IMAGE=${{ vars.DOCKERHUB_USERNAME }}/provisioner-auth:latest
-          docker build . --file Dockerfile.auth --tag $IMAGE
-          docker push $IMAGE
+          IMAGE_BASE=${REGISTRY_USER}/provisioner-auth
+          docker build . --file Dockerfile.auth --tag ${IMAGE_BASE}:${GIT_SHA} --tag ${IMAGE_BASE}:latest
+          docker push ${IMAGE_BASE}:${GIT_SHA}
+          docker push ${IMAGE_BASE}:latest
+          echo "PROVISIONER_AUTH_IMAGE=${IMAGE_BASE}:${GIT_SHA}" >> $GITHUB_ENV
+
+      - name: Update ArgoCD repo
+        if: github.ref == 'refs/heads/main'
+        env:
+          ARGOCD_REPO: https://github.com/Lidoca/kosa-argocd.git
+          ARGOCD_BRANCH: main
+          GIT_TOKEN: ${{ secrets.KOSA_ARGOCD_PAT }}
+        run: |
+          git clone https://x-access-token:${GIT_TOKEN}@github.com/Lidoca/kosa-argocd.git argocd-repo
+          cd argocd-repo
+
+          sed -i "s|docker.io/nervyniftypyramid/provisioner:[^ ]*|${PROVISIONER_IMAGE}|g" provisioner/provisioner-deployment.yaml
+
+          sed -i "s|docker.io/nervyniftypyramid/provisioner-auth:[^ ]*|${PROVISIONER_AUTH_IMAGE}|g" provisioner/provision-auth-deployment.yaml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add provisioner/*.yaml
+          git commit -m "chore: update provisioner images to ${GIT_SHORT_SHA}" || exit 0
+          git push origin ${ARGOCD_BRANCH}
